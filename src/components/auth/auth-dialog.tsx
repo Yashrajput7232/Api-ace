@@ -6,6 +6,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -15,6 +16,7 @@ import { User, LogOut } from "lucide-react";
 import { LoginForm } from "./login-form";
 import { RegisterForm } from "./register-form";
 import { useState } from "react";
+import { Separator } from "../ui/separator";
 
 export function AuthDialog() {
   const { state, logout } = useApiAce();
@@ -61,6 +63,10 @@ export function AuthDialog() {
             <RegisterForm onRegister={() => setIsOpen(false)} />
           </TabsContent>
         </Tabs>
+        <Separator className="my-2" />
+         <Button variant="link" onClick={() => setIsOpen(false)}>
+            Continue as Guest
+          </Button>
       </DialogContent>
     </Dialog>
   );
