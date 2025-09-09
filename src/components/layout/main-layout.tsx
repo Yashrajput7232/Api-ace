@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/resizable';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { SidebarProvider } from '../ui/sidebar';
-import { Sheet, SheetContent, SheetTrigger } from '../ui/sheet';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '../ui/sheet';
 import { Button } from '../ui/button';
 import { PanelLeft } from 'lucide-react';
 
@@ -26,8 +26,13 @@ export function MainLayout() {
                                 <PanelLeft className="h-5 w-5" />
                             </Button>
                         </SheetTrigger>
-                        <SheetContent side="left" className="p-0 w-3/4">
-                           <Sidebar />
+                        <SheetContent side="left" className="p-0 w-3/4 flex flex-col">
+                            <SheetHeader className="p-4 border-b">
+                                <SheetTitle className="text-left text-2xl font-headline font-bold text-primary">API Ace</SheetTitle>
+                            </SheetHeader>
+                           <div className="flex-1 overflow-y-auto">
+                             <Sidebar />
+                           </div>
                         </SheetContent>
                      </Sheet>
                 </header>

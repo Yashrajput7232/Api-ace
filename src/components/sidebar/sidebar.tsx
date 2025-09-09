@@ -55,10 +55,10 @@ export function Sidebar() {
   };
 
   return (
-    <div className="h-full flex flex-col bg-background border-r">
-      <div className="p-4 border-b">
-        <h1 className="text-2xl font-headline font-bold text-primary">API Ace</h1>
-        <p className="text-sm text-muted-foreground">Client-Side API Tester</p>
+    <div className="h-full flex flex-col bg-background">
+       <div className="p-4 border-b md:border-b-0">
+        <h1 className="text-2xl font-headline font-bold text-primary hidden md:block">API Ace</h1>
+        <p className="text-sm text-muted-foreground hidden md:block">Client-Side API Tester</p>
       </div>
 
       <div className="p-2 grid grid-cols-2 gap-2">
