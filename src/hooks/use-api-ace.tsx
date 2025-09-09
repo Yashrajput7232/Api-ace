@@ -280,7 +280,7 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
     dispatch({type: 'SET_INITIAL_STATE', payload: {...state, collections: updatedCollections}});
     openRequestInTab(newRequest.id);
 
-  }, [state.collections, openRequestInTab, state]);
+  }, [state, openRequestInTab]);
   
   const deleteRequest = useCallback((collectionId: string, requestId: string) => {
     const updatedCollections = state.collections.map(c => {
@@ -386,8 +386,8 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
         headers.append('Authorization', `Basic ${encoded}`);
       }
 
-
-      if(tab.method !== 'GET' && tab.method !== 'HEAD' && tab.body) {
+      const hasBody = tab.method !== 'GET' && tab.method !== 'HEAD' && tab.body;
+      if(hasBody) {
         if(!headers.has('Content-Type')) {
             headers.append('Content-Type', 'application/json');
         }
@@ -396,7 +396,7 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
       const response = await fetch(url.toString(), {
         method: tab.method,
         headers,
-        body: (tab.method !== 'GET' && tab.method !== 'HEAD' && tab.body) ? tab.body : undefined,
+        body: hasBody ? tab.body : undefined,
       });
 
       const endTime = Date.now();
@@ -438,7 +438,7 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
       };
       dispatch({ type: 'REQUEST_ERROR', payload: { tabId, response: apiResponse } });
     }
-  }, [state.activeTabs, state.collections]);
+  }, [state.activeTabs]);
 
   return (
     <ApiAceContext.Provider value={{

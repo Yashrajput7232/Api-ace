@@ -13,7 +13,7 @@ interface RequestTabsProps {
 }
 
 export function RequestTabs({ tab, onUpdate }: RequestTabsProps) {
-  const hasBody = tab.method !== 'GET' && tab.method !== 'HEAD';
+  const hasBody = tab.method !== 'GET' && tab.method !== 'HEAD' && tab.method !== 'OPTIONS' && tab.method !== 'DELETE';
 
   return (
     <Tabs defaultValue="params" className="flex-1 flex flex-col">
