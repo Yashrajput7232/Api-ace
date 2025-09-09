@@ -1,6 +1,6 @@
 "use client";
 import React, { useState } from 'react';
-import type { Collection } from '@/types';
+import type { Collection, ApiRequest } from '@/types';
 import { useApiAce } from '@/hooks/use-api-ace';
 import {
   Accordion,
@@ -36,7 +36,7 @@ interface CollectionItemProps {
 }
 
 export function CollectionItem({ collection }: CollectionItemProps) {
-  const { openRequestInTab, exportCollection, updateCollectionName, deleteCollection, createRequest, deleteRequest } = useApiAce();
+  const { state, openRequestInTab, exportCollection, updateCollectionName, deleteCollection, createRequest, deleteRequest } = useApiAce();
   const [isEditing, setIsEditing] = useState(false);
   const [newName, setNewName] = useState(collection.name);
   const [newRequestName, setNewRequestName] = useState('');
@@ -62,6 +62,10 @@ export function CollectionItem({ collection }: CollectionItemProps) {
     navigator.clipboard.writeText(collection.id);
     toast({ title: 'Access Code Copied', description: 'The collection access code has been copied to your clipboard.' });
   };
+  
+  const findRequestInCollection = (requestId: string): ApiRequest | undefined => {
+      return collection.requests.find(r => r.id === requestId);
+  }
 
   return (
     <Accordion type="single" collapsible>
@@ -128,7 +132,10 @@ export function CollectionItem({ collection }: CollectionItemProps) {
             {collection.requests.map((request) => (
                <div key={request.id} className="group flex items-center justify-between rounded-md hover:bg-muted/50">
                  <button
-                   onClick={() => openRequestInTab(request.id)}
+                   onClick={() => {
+                       const req = findRequestInCollection(request.id);
+                       if(req) openRequestInTab(req);
+                   }}
                    className="flex-1 flex items-center gap-2 p-1.5 text-left"
                  >
                   <HttpMethodBadge method={request.method} />

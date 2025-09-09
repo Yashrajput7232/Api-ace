@@ -17,6 +17,8 @@ type Action =
   | { type: 'ADD_COLLECTION'; payload: Collection }
   | { type: 'DELETE_COLLECTION'; payload: string }
   | { type: 'UPDATE_COLLECTION_NAME'; payload: { id: string; name: string } }
+  | { type: 'CREATE_REQUEST'; payload: { collectionId: string; request: ApiRequest } }
+  | { type: 'DELETE_REQUEST'; payload: { collectionId: string; requestId: string } }
   | { type: 'IMPORT_COLLECTIONS'; payload: Collection[] }
   | { type: 'OPEN_TAB'; payload: ApiRequest }
   | { type: 'CLOSE_TAB'; payload: string }
@@ -76,6 +78,26 @@ const appReducer = (state: AppState, action: Action): AppState => {
         ...state,
         collections: state.collections.map(c => c.id === action.payload.id ? { ...c, name: action.payload.name } : c)
       };
+
+    case 'CREATE_REQUEST':
+        return {
+            ...state,
+            collections: state.collections.map(c => 
+                c.id === action.payload.collectionId 
+                ? { ...c, requests: [...c.requests, action.payload.request] }
+                : c
+            )
+        };
+    
+    case 'DELETE_REQUEST':
+        return {
+            ...state,
+            collections: state.collections.map(c => 
+                c.id === action.payload.collectionId
+                ? { ...c, requests: c.requests.filter(r => r.id !== action.payload.requestId) }
+                : c
+            )
+        };
 
     case 'IMPORT_COLLECTIONS':
       const newCollections = action.payload.filter(
@@ -186,7 +208,7 @@ interface ApiAceContextType {
   updateCollectionName: (id: string, name: string) => void;
   importCollections: (file: File) => void;
   exportCollection: (collectionId: string) => void;
-  openRequestInTab: (requestId: string) => void;
+  openRequestInTab: (request: ApiRequest) => void;
   sendRequest: (tabId: string) => Promise<void>;
   createRequest: (collectionId: string, name: string) => void;
   deleteRequest: (collectionId: string, requestId: string) => void;
@@ -222,22 +244,13 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [state, toast]);
 
-  const openRequestInTab = useCallback((requestId: string) => {
-    let requestToOpen: ApiRequest | undefined;
-    for (const collection of state.collections) {
-      const foundRequest = collection.requests.find(r => r.id === requestId);
-      if (foundRequest) {
-        requestToOpen = foundRequest;
-        break;
-      }
-    }
-
+  const openRequestInTab = useCallback((requestToOpen: ApiRequest) => {
     if (requestToOpen) {
       dispatch({ type: 'OPEN_TAB', payload: requestToOpen });
     } else {
       toast({ variant: "destructive", title: "Error", description: "Request not found." });
     }
-  }, [state.collections, toast]);
+  }, [toast]);
 
   const createCollection = useCallback((name: string): Collection => {
     const newCollection: Collection = { id: crypto.randomUUID(), name, requests: [] };
@@ -271,31 +284,16 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
       params: []
     };
     
-    const updatedCollections = state.collections.map(c => 
-        c.id === collectionId 
-        ? { ...c, requests: [...c.requests, newRequest] }
-        : c
-    );
+    dispatch({type: 'CREATE_REQUEST', payload: { collectionId, request: newRequest }});
+    openRequestInTab(newRequest);
 
-    dispatch({type: 'SET_INITIAL_STATE', payload: {...state, collections: updatedCollections}});
-    openRequestInTab(newRequest.id);
-
-  }, [state, openRequestInTab]);
+  }, [state.collections, openRequestInTab]);
   
   const deleteRequest = useCallback((collectionId: string, requestId: string) => {
-    const updatedCollections = state.collections.map(c => {
-      if (c.id === collectionId) {
-        return {
-          ...c,
-          requests: c.requests.filter(r => r.id !== requestId)
-        }
-      }
-      return c;
-    });
-    dispatch({type: 'SET_INITIAL_STATE', payload: {...state, collections: updatedCollections}})
+    dispatch({type: 'DELETE_REQUEST', payload: { collectionId, requestId }});
     dispatch({type: 'CLOSE_TAB', payload: requestId});
     toast({title: 'Request deleted'})
-  }, [state, toast]);
+  }, [toast]);
 
   const importCollections = useCallback((file: File) => {
     const reader = new FileReader();
@@ -439,6 +437,17 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
       dispatch({ type: 'REQUEST_ERROR', payload: { tabId, response: apiResponse } });
     }
   }, [state.activeTabs]);
+  
+  const findRequestById = (requestId: string): ApiRequest | undefined => {
+    for (const collection of state.collections) {
+      const foundRequest = collection.requests.find(r => r.id === requestId);
+      if (foundRequest) {
+        return foundRequest;
+      }
+    }
+    return undefined;
+  };
+
 
   return (
     <ApiAceContext.Provider value={{
@@ -449,7 +458,15 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
       updateCollectionName,
       importCollections,
       exportCollection,
-      openRequestInTab,
+      openRequestInTab: (request: ApiRequest) => {
+        const req = findRequestById(request.id);
+        if (req) {
+            openRequestInTab(req);
+        } else {
+            // It's a new request, open it directly
+            openRequestInTab(request);
+        }
+      },
       sendRequest,
       createRequest,
       deleteRequest
