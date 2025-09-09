@@ -52,7 +52,6 @@ export function CollectionItem({ collection }: CollectionItemProps) {
   
   const handleCreateRequest = () => {
     if (newRequestName.trim()) {
-      const updatedCollection = { ...collection, requests: [...collection.requests, {id: crypto.randomUUID(), name: newRequestName, collectionId: collection.id, method: 'GET', url: '', params: [], headers: [], body: ''}]};
       createRequest(collection.id, newRequestName);
       setNewRequestName('');
       setIsAddingRequest(false);

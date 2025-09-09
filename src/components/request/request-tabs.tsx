@@ -3,6 +3,7 @@
 import type { RequestTab } from '@/types';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { KeyValueEditor } from './key-value-editor';
+import { AuthPanel } from './auth-panel';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 
@@ -20,6 +21,7 @@ export function RequestTabs({ tab, onUpdate }: RequestTabsProps) {
         <TabsTrigger value="params">
           Params <Badge variant="secondary" className="ml-2">{tab.params.filter(p => p.enabled).length}</Badge>
         </TabsTrigger>
+        <TabsTrigger value="auth">Authorization</TabsTrigger>
         <TabsTrigger value="headers">
           Headers <Badge variant="secondary" className="ml-2">{tab.headers.filter(h => h.enabled).length}</Badge>
         </TabsTrigger>
@@ -30,6 +32,9 @@ export function RequestTabs({ tab, onUpdate }: RequestTabsProps) {
           items={tab.params}
           onChange={(newParams) => onUpdate({ params: newParams })}
         />
+      </TabsContent>
+      <TabsContent value="auth" className="flex-1 overflow-auto p-1">
+        <AuthPanel auth={tab.auth} onUpdate={(auth) => onUpdate({ auth })} />
       </TabsContent>
       <TabsContent value="headers" className="flex-1 overflow-auto p-1">
         <KeyValueEditor

@@ -1,6 +1,6 @@
 "use client";
 
-import type { Collection, ApiRequest, RequestTab, ApiResponse, HttpMethod, KeyValue } from '@/types';
+import type { Collection, ApiRequest, RequestTab, ApiResponse, HttpMethod, Auth } from '@/types';
 import React, { createContext, useContext, useReducer, useEffect, useCallback, ReactNode } from 'react';
 import { useToast } from './use-toast';
 
@@ -33,10 +33,37 @@ const initialState: AppState = {
   activeTabId: null,
 };
 
+// Helper to add default auth to legacy requests
+const addDefaultAuth = (request: Partial<ApiRequest>): ApiRequest => {
+    const baseRequest = {
+        id: '',
+        name: '',
+        url: '',
+        method: 'GET' as HttpMethod,
+        headers: [],
+        params: [],
+        body: '',
+        collectionId: '',
+        ...request,
+    };
+    if (!baseRequest.auth) {
+        baseRequest.auth = { type: 'no-auth' };
+    }
+    return baseRequest as ApiRequest;
+}
+
+
 const appReducer = (state: AppState, action: Action): AppState => {
   switch (action.type) {
     case 'SET_INITIAL_STATE':
-      return action.payload;
+        // Add default auth to collections and tabs if it's missing (for legacy data)
+        const collectionsWithAuth = action.payload.collections.map(c => ({
+            ...c,
+            requests: c.requests.map(r => addDefaultAuth(r))
+        }));
+        const tabsWithAuth = action.payload.activeTabs.map(t => addDefaultAuth(t) as RequestTab);
+
+        return { ...action.payload, collections: collectionsWithAuth, activeTabs: tabsWithAuth };
 
     case 'ADD_COLLECTION':
       return { ...state, collections: [...state.collections, action.payload] };
@@ -53,7 +80,8 @@ const appReducer = (state: AppState, action: Action): AppState => {
     case 'IMPORT_COLLECTIONS':
       const newCollections = action.payload.filter(
         (newC) => !state.collections.some((existingC) => existingC.id === newC.id)
-      );
+      ).map(c => ({...c, requests: c.requests.map(r => addDefaultAuth(r))}));
+      
       return { ...state, collections: [...state.collections, ...newCollections] };
 
     case 'OPEN_TAB': {
@@ -61,7 +89,8 @@ const appReducer = (state: AppState, action: Action): AppState => {
       if (existingTab) {
         return { ...state, activeTabId: existingTab.id };
       }
-      const newTab: RequestTab = { ...action.payload, loading: false, isDirty: false };
+      const requestWithAuth = addDefaultAuth(action.payload);
+      const newTab: RequestTab = { ...requestWithAuth, loading: false, isDirty: false };
       return {
         ...state,
         activeTabs: [...state.activeTabs, newTab],
@@ -107,9 +136,10 @@ const appReducer = (state: AppState, action: Action): AppState => {
       const updatedCollections = state.collections.map(collection => {
         if (collection.id === activeTab.collectionId) {
           const requestExists = collection.requests.some(r => r.id === activeTab.id);
+          const requestToSave = addDefaultAuth(activeTab);
           const updatedRequests = requestExists
-            ? collection.requests.map(r => r.id === activeTab.id ? { ...activeTab, isDirty: false } : r)
-            : [...collection.requests, { ...activeTab, isDirty: false }];
+            ? collection.requests.map(r => r.id === activeTab.id ? { ...requestToSave, isDirty: false } : r)
+            : [...collection.requests, { ...requestToSave, isDirty: false }];
           return { ...collection, requests: updatedRequests };
         }
         return collection;
@@ -192,22 +222,6 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [state, toast]);
 
-  const createCollection = useCallback((name: string): Collection => {
-    const newCollection: Collection = { id: crypto.randomUUID(), name, requests: [] };
-    dispatch({ type: 'ADD_COLLECTION', payload: newCollection });
-    toast({ title: "Collection created", description: `"${name}" has been created.` });
-    return newCollection;
-  }, [toast]);
-  
-  const deleteCollection = useCallback((id: string) => {
-    dispatch({ type: 'DELETE_COLLECTION', payload: id });
-    toast({ title: "Collection deleted" });
-  }, [toast]);
-
-  const updateCollectionName = useCallback((id: string, name: string) => {
-    dispatch({ type: 'UPDATE_COLLECTION_NAME', payload: { id, name } });
-  }, []);
-
   const openRequestInTab = useCallback((requestId: string) => {
     let requestToOpen: ApiRequest | undefined;
     for (const collection of state.collections) {
@@ -224,6 +238,22 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
       toast({ variant: "destructive", title: "Error", description: "Request not found." });
     }
   }, [state.collections, toast]);
+
+  const createCollection = useCallback((name: string): Collection => {
+    const newCollection: Collection = { id: crypto.randomUUID(), name, requests: [] };
+    dispatch({ type: 'ADD_COLLECTION', payload: newCollection });
+    toast({ title: "Collection created", description: `"${name}" has been created.` });
+    return newCollection;
+  }, [toast]);
+  
+  const deleteCollection = useCallback((id: string) => {
+    dispatch({ type: 'DELETE_COLLECTION', payload: id });
+    toast({ title: "Collection deleted" });
+  }, [toast]);
+
+  const updateCollectionName = useCallback((id: string, name: string) => {
+    dispatch({ type: 'UPDATE_COLLECTION_NAME', payload: { id, name } });
+  }, []);
   
   const createRequest = useCallback((collectionId: string, name: string) => {
     const collection = state.collections.find(c => c.id === collectionId);
@@ -236,45 +266,21 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
       method: 'GET',
       url: '',
       body: '',
+      auth: { type: 'no-auth' },
       headers: [],
       params: []
     };
     
-    const updatedCollection: Collection = {
-      ...collection,
-      requests: [...collection.requests, newRequest]
-    }
-
-    dispatch({ 
-      type: 'SAVE_ACTIVE_TAB',
-      // This is a bit of a hack, but it works.
-      // We need to update the collections state with the new request.
-      // We can do this by creating a "fake" active tab and saving it.
-      // A better way would be a dedicated "ADD_REQUEST" action.
-      // But let's stick to the current reducer for now.
-    });
-
-    const tempState = appReducer(state, {
-      type: 'OPEN_TAB',
-      payload: newRequest,
-    })
-
-    const newTab: RequestTab = { ...newRequest, isDirty: true, loading: false };
-
-    const finalState = appReducer(
-      appReducer(state, { type: 'ADD_COLLECTION', payload: updatedCollection }), 
-      { type: 'OPEN_TAB', payload: newRequest }
+    const updatedCollections = state.collections.map(c => 
+        c.id === collectionId 
+        ? { ...c, requests: [...c.requests, newRequest] }
+        : c
     );
-     const finalStateWithSavedTab = appReducer(
-       {...state, collections: state.collections.map(c => c.id === collectionId ? {...c, requests: [...c.requests, newRequest]} : c)}, {
-      type: 'SAVE_ACTIVE_TAB'
-    })
 
-    dispatch({type: 'SET_INITIAL_STATE', payload: finalStateWithSavedTab})
+    dispatch({type: 'SET_INITIAL_STATE', payload: {...state, collections: updatedCollections}});
     openRequestInTab(newRequest.id);
 
-
-  }, [state.collections, openRequestInTab]);
+  }, [state.collections, openRequestInTab, state]);
   
   const deleteRequest = useCallback((collectionId: string, requestId: string) => {
     const updatedCollections = state.collections.map(c => {
@@ -348,11 +354,20 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
     const startTime = Date.now();
     try {
       const url = new URL(tab.url);
+      const params = new URLSearchParams(url.search);
+      
+      // Add regular params
       tab.params.forEach(param => {
         if (param.enabled && param.key) {
-          url.searchParams.append(param.key, param.value);
+          params.append(param.key, param.value);
         }
       });
+
+      // Handle auth params
+       if (tab.auth.type === 'api-key' && tab.auth.apiKey?.in === 'query') {
+        params.append(tab.auth.apiKey.key, tab.auth.apiKey.value);
+      }
+      url.search = params.toString();
 
       const headers = new Headers();
       tab.headers.forEach(header => {
@@ -360,6 +375,18 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
           headers.append(header.key, header.value);
         }
       });
+
+      // Handle auth headers
+      if (tab.auth.type === 'api-key' && tab.auth.apiKey?.in === 'header') {
+        headers.append(tab.auth.apiKey.key, tab.auth.apiKey.value);
+      } else if (tab.auth.type === 'bearer' && tab.auth.bearer?.token) {
+        headers.append('Authorization', `Bearer ${tab.auth.bearer.token}`);
+      } else if (tab.auth.type === 'basic' && tab.auth.basic?.username) {
+        const encoded = btoa(`${tab.auth.basic.username}:${tab.auth.basic.password}`);
+        headers.append('Authorization', `Basic ${encoded}`);
+      }
+
+
       if(tab.method !== 'GET' && tab.method !== 'HEAD' && tab.body) {
         if(!headers.has('Content-Type')) {
             headers.append('Content-Type', 'application/json');
@@ -411,7 +438,7 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
       };
       dispatch({ type: 'REQUEST_ERROR', payload: { tabId, response: apiResponse } });
     }
-  }, [state.activeTabs]);
+  }, [state.activeTabs, state.collections]);
 
   return (
     <ApiAceContext.Provider value={{
