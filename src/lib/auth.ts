@@ -9,6 +9,7 @@ if (!JWT_SECRET) {
     throw new Error('Please define the JWT_SECRET environment variable inside .env');
 }
 
+// --- JWT Helpers ---
 export const verifyToken = (token: string) => {
     try {
         return jwt.verify(token, JWT_SECRET);
@@ -21,8 +22,10 @@ export const createToken = (payload: object) => {
     return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
 };
 
-export const getUserIdFromRequest = (): string | null => {
-    const token = cookies().get('auth_token')?.value;
+// --- Cookie Helpers ---
+export const getUserIdFromRequest = async (): Promise<string | null> => {
+    const cookieStore = await cookies();               // await cookies()
+    const token = cookieStore.get('auth_token')?.value;
     if (!token) return null;
 
     const decoded = verifyToken(token);
@@ -32,18 +35,19 @@ export const getUserIdFromRequest = (): string | null => {
     return decoded.userId as string;
 };
 
+// --- Fetch User ---
 export const getUserFromRequest = async (): Promise<Omit<User, 'password'> | null> => {
-    const userId = getUserIdFromRequest();
+    const userId = await getUserIdFromRequest();
     if (!userId) return null;
 
     try {
         const db = await getDb();
-        const user = await db.collection<Omit<User, 'id'>>('users').findOne({ _id: new ObjectId(userId) });
+        // fetch full user including password
+        const user = await db.collection<User>('users').findOne({ _id: new ObjectId(userId) });
         if (!user) return null;
 
-        const { _id, password, ...userWithoutPassword } = user;
+        const { _id, password, id, ...userWithoutPassword } = user; // destructure `id` if it exists
         return { id: _id.toHexString(), ...userWithoutPassword };
-
     } catch (error) {
         console.error("Failed to fetch user:", error);
         return null;
