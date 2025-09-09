@@ -43,7 +43,7 @@ export interface Collection {
   id: string;
   name: string;
   requests: ApiRequest[];
-  userId: ObjectId;
+  userId?: ObjectId;
 }
 
 export interface ApiResponse {
@@ -62,8 +62,13 @@ export interface RequestTab extends ApiRequest {
 }
 
 export interface User {
-  _id: ObjectId;
+  _id?: ObjectId;
   id: string;
   email: string;
   password: string;
+}
+
+export interface NewUser {
+    email: string;
+    password: string;
 }

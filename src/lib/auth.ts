@@ -32,7 +32,7 @@ export const getUserIdFromRequest = (): string | null => {
     return decoded.userId as string;
 };
 
-export const getUserFromRequest = async (): Promise<User | null> => {
+export const getUserFromRequest = async (): Promise<Omit<User, 'password'> | null> => {
     const userId = getUserIdFromRequest();
     if (!userId) return null;
 

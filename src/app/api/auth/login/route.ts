@@ -4,6 +4,7 @@ import { User } from '@/types';
 import bcrypt from 'bcryptjs';
 import { createToken } from '@/lib/auth';
 import { cookies } from 'next/headers';
+import { ObjectId } from 'mongodb';
 
 export async function POST(request: Request) {
     try {
@@ -14,7 +15,7 @@ export async function POST(request: Request) {
         }
 
         const db = await getDb();
-        const usersCollection = db.collection<User>('users');
+        const usersCollection = db.collection<{_id: ObjectId, email: string, password: string}>('users');
         const user = await usersCollection.findOne({ email });
 
         if (!user) {
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
         
         const { password: _, ...userWithoutPassword } = user;
 
-        return NextResponse.json({ message: 'Login successful.', user: userWithoutPassword }, { status: 200 });
+        return NextResponse.json({ message: 'Login successful.', user: { ...userWithoutPassword, id: user._id.toHexString() } }, { status: 200 });
 
     } catch (error) {
         console.error('Login failed:', error);

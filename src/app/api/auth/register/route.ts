@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb } from '@/lib/mongo';
-import { User } from '@/types';
+import { NewUser } from '@/types';
 import bcrypt from 'bcryptjs';
 
 export async function POST(request: Request) {
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
         }
 
         const db = await getDb();
-        const usersCollection = db.collection<Omit<User, 'id'>>('users');
+        const usersCollection = db.collection<NewUser>('users');
 
         const existingUser = await usersCollection.findOne({ email });
         if (existingUser) {
