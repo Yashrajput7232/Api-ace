@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { RequestTabs } from './request-tabs';
-import { Send, Save, Loader2 } from 'lucide-react';
+import { Send, Save, Loader2, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { SuggestParameters } from '../ai/suggest-parameters';
 
@@ -22,7 +22,7 @@ interface RequestPanelProps {
 const methods: HttpMethod[] = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
 
 export function RequestPanel({ tab }: RequestPanelProps) {
-  const { dispatch, sendRequest } = useApiAce();
+  const { dispatch, sendRequest, cancelRequest } = useApiAce();
   const { toast } = useToast();
 
   const handleUpdate = (update: Partial<RequestTab>) => {
@@ -33,6 +33,14 @@ export function RequestPanel({ tab }: RequestPanelProps) {
     dispatch({ type: 'SAVE_ACTIVE_TAB' });
     toast({ title: "Request Saved", description: `"${tab.name}" has been saved to its collection.` });
   };
+  
+  const handleSendOrCancel = () => {
+      if (tab.loading) {
+          cancelRequest(tab.id);
+      } else {
+          sendRequest(tab.id);
+      }
+  }
 
   return (
     <div className="h-full flex flex-col p-2 gap-2">
@@ -65,13 +73,18 @@ export function RequestPanel({ tab }: RequestPanelProps) {
             onChange={(e) => handleUpdate({ url: e.target.value })}
             className="flex-1 font-mono"
           />
-          <Button onClick={() => sendRequest(tab.id)} disabled={tab.loading} className="w-28">
+          <Button onClick={handleSendOrCancel} className="w-28">
             {tab.loading ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <>
+                <XCircle className="mr-2 h-4 w-4" />
+                Cancel
+              </>
             ) : (
-              <Send className="mr-2 h-4 w-4" />
+              <>
+                <Send className="mr-2 h-4 w-4" />
+                Send
+              </>
             )}
-            Send
           </Button>
           <Button onClick={handleSave} variant="outline" disabled={!tab.isDirty}>
             <Save className="mr-2 h-4 w-4" />

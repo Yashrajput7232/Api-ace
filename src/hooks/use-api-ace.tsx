@@ -1,7 +1,7 @@
 "use client";
 
 import type { Collection, ApiRequest, RequestTab, ApiResponse, HttpMethod, Auth } from '@/types';
-import React, { createContext, useContext, useReducer, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useCallback, ReactNode, useRef } from 'react';
 import { useToast } from './use-toast';
 
 // --- STATE AND REDUCER ---
@@ -26,8 +26,7 @@ type Action =
   | { type: 'UPDATE_ACTIVE_TAB'; payload: Partial<RequestTab> }
   | { type: 'SAVE_ACTIVE_TAB' }
   | { type: 'REQUEST_START'; payload: string }
-  | { type: 'REQUEST_SUCCESS'; payload: { tabId: string; response: ApiResponse } }
-  | { type: 'REQUEST_ERROR'; payload: { tabId: string; response: ApiResponse } };
+  | { type: 'REQUEST_COMPLETE'; payload: { tabId: string; response?: ApiResponse } };
 
 const initialState: AppState = {
   collections: [],
@@ -184,8 +183,7 @@ const appReducer = (state: AppState, action: Action): AppState => {
         ),
       };
 
-    case 'REQUEST_SUCCESS':
-    case 'REQUEST_ERROR':
+    case 'REQUEST_COMPLETE':
       return {
         ...state,
         activeTabs: state.activeTabs.map(tab =>
@@ -210,6 +208,7 @@ interface ApiAceContextType {
   exportCollection: (collectionId: string) => void;
   openRequestInTab: (request: ApiRequest) => void;
   sendRequest: (tabId: string) => Promise<void>;
+  cancelRequest: (tabId: string) => void;
   createRequest: (collectionId: string, name: string) => void;
   deleteRequest: (collectionId: string, requestId: string) => void;
 }
@@ -219,6 +218,7 @@ const ApiAceContext = createContext<ApiAceContextType | undefined>(undefined);
 export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
   const [state, dispatch] = useReducer(appReducer, initialState);
   const { toast } = useToast();
+  const abortControllers = useRef(new Map<string, AbortController>());
 
   useEffect(() => {
     try {
@@ -233,7 +233,13 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     try {
-      localStorage.setItem('apiAceState', JSON.stringify(state));
+      // Create a partial state to avoid serializing non-serializable data
+      const stateToStore = {
+          collections: state.collections,
+          activeTabs: state.activeTabs.map(({ ...tab }) => tab), // Create a shallow copy
+          activeTabId: state.activeTabId,
+      };
+      localStorage.setItem('apiAceState', JSON.stringify(stateToStore));
     } catch (error) {
       console.error("Failed to save state to localStorage", error);
       toast({
@@ -243,6 +249,16 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
       });
     }
   }, [state, toast]);
+
+  const findRequestById = useCallback((requestId: string): ApiRequest | undefined => {
+    for (const collection of state.collections) {
+      const foundRequest = collection.requests.find(r => r.id === requestId);
+      if (foundRequest) {
+        return foundRequest;
+      }
+    }
+    return undefined;
+  }, [state.collections]);
 
   const openRequestInTab = useCallback((requestToOpen: ApiRequest) => {
     if (requestToOpen) {
@@ -343,10 +359,21 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
     linkElement.click();
   }, [state.collections, toast]);
 
+  const cancelRequest = useCallback((tabId: string) => {
+    const controller = abortControllers.current.get(tabId);
+    if (controller) {
+      controller.abort();
+      abortControllers.current.delete(tabId);
+    }
+  }, []);
+
   const sendRequest = useCallback(async (tabId: string) => {
     const tab = state.activeTabs.find(t => t.id === tabId);
     if (!tab) return;
-
+    
+    const controller = new AbortController();
+    abortControllers.current.set(tabId, controller);
+    
     dispatch({ type: 'REQUEST_START', payload: tabId });
 
     const startTime = Date.now();
@@ -354,14 +381,12 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
       const url = new URL(tab.url);
       const params = new URLSearchParams(url.search);
       
-      // Add regular params
       tab.params.forEach(param => {
         if (param.enabled && param.key) {
           params.append(param.key, param.value);
         }
       });
 
-      // Handle auth params
        if (tab.auth.type === 'api-key' && tab.auth.apiKey?.in === 'query') {
         params.append(tab.auth.apiKey.key, tab.auth.apiKey.value);
       }
@@ -374,7 +399,6 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
         }
       });
 
-      // Handle auth headers
       if (tab.auth.type === 'api-key' && tab.auth.apiKey?.in === 'header') {
         headers.append(tab.auth.apiKey.key, tab.auth.apiKey.value);
       } else if (tab.auth.type === 'bearer' && tab.auth.bearer?.token) {
@@ -395,6 +419,7 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
         method: tab.method,
         headers,
         body: hasBody ? tab.body : undefined,
+        signal: controller.signal
       });
 
       const endTime = Date.now();
@@ -420,9 +445,20 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
         size: new Blob([responseText]).size,
       };
 
-      dispatch({ type: 'REQUEST_SUCCESS', payload: { tabId, response: apiResponse } });
+      dispatch({ type: 'REQUEST_COMPLETE', payload: { tabId, response: apiResponse } });
     } catch (error) {
-      const endTime = Date.now();
+      if (error instanceof Error && error.name === 'AbortError') {
+        const apiResponse: ApiResponse = {
+            status: 0,
+            statusText: 'Cancelled',
+            data: { message: 'Request was cancelled by the user.' },
+            headers: {},
+            time: Date.now() - startTime,
+            size: 0,
+        };
+        dispatch({ type: 'REQUEST_COMPLETE', payload: { tabId, response: apiResponse } });
+        return;
+      }
       const apiResponse: ApiResponse = {
         status: 0,
         statusText: 'Fetch Error',
@@ -431,24 +467,15 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
           hint: "This could be a CORS issue. Check the browser console (F12) for more details. The API server must send the 'Access-Control-Allow-Origin' header.",
         },
         headers: {},
-        time: endTime - startTime,
+        time: Date.now() - startTime,
         size: 0,
       };
-      dispatch({ type: 'REQUEST_ERROR', payload: { tabId, response: apiResponse } });
+      dispatch({ type: 'REQUEST_COMPLETE', payload: { tabId, response: apiResponse } });
+    } finally {
+        abortControllers.current.delete(tabId);
     }
   }, [state.activeTabs]);
   
-  const findRequestById = (requestId: string): ApiRequest | undefined => {
-    for (const collection of state.collections) {
-      const foundRequest = collection.requests.find(r => r.id === requestId);
-      if (foundRequest) {
-        return foundRequest;
-      }
-    }
-    return undefined;
-  };
-
-
   return (
     <ApiAceContext.Provider value={{
       state,
@@ -463,11 +490,11 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
         if (req) {
             openRequestInTab(req);
         } else {
-            // It's a new request, open it directly
             openRequestInTab(request);
         }
       },
       sendRequest,
+      cancelRequest,
       createRequest,
       deleteRequest
     }}>
