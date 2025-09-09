@@ -1,6 +1,11 @@
 import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
+  compiler: {
+    reactRemoveProperties: {
+      properties: ['^data-test-id$'],
+    },
+  },
   /* config options here */
   typescript: {
     ignoreBuildErrors: true,
