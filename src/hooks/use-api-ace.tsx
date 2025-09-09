@@ -3,8 +3,6 @@
 import type { Collection, ApiRequest, RequestTab, ApiResponse, HttpMethod, Auth, User } from '@/types';
 import React, { createContext, useContext, useReducer, useEffect, useCallback, ReactNode, useRef } from 'react';
 import { useToast } from './use-toast';
-import { ObjectId } from 'mongodb';
-
 
 // --- STATE AND REDUCER ---
 
@@ -298,19 +296,42 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
     dispatch({ type: 'OPEN_TAB', payload: requestToOpen });
   }, []);
 
-  const createCollection = useCallback((name: string) => {
-    const newCollection: Collection = { 
-        id: new ObjectId().toHexString(), 
+  const createCollection = useCallback(async (name: string) => {
+    const tempId = `temp_${Date.now()}`;
+    const newCollection: Partial<Collection> = { 
+        id: tempId, 
         name, 
         requests: [],
-        userId: state.user ? new ObjectId(state.user.id) : undefined as any // Hack until we fix types
     };
-    dispatch({ type: 'ADD_COLLECTION', payload: newCollection });
     if (state.user) {
-        syncToCloud(newCollection);
+        newCollection.userId = state.user.id as any; 
     }
-    toast({ title: "Collection created", description: `"${name}" has been created.` });
-  }, [toast, state.user, syncToCloud]);
+    dispatch({ type: 'ADD_COLLECTION', payload: newCollection as Collection });
+    
+    if (state.user) {
+        try {
+            const response = await fetch('/api/collections', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name }), // Send only name, backend generates ID
+            });
+            const { collectionId } = await response.json();
+            
+            // Update temp collection with real ID from backend
+            dispatch({ type: 'DELETE_COLLECTION', payload: tempId });
+            dispatch({ 
+                type: 'ADD_COLLECTION', 
+                payload: { ...newCollection, id: collectionId } as Collection 
+            });
+            toast({ title: "Collection created", description: `"${name}" has been created and saved to the cloud.` });
+
+        } catch(e) {
+             toast({ variant: "destructive", title: "Failed to create collection"});
+        }
+    } else {
+        toast({ title: "Collection created", description: `"${name}" has been created locally.` });
+    }
+  }, [toast, state.user]);
   
   const deleteCollection = useCallback(async (id: string) => {
     dispatch({ type: 'DELETE_COLLECTION', payload: id });
@@ -652,3 +673,5 @@ export const useApiAce = (): ApiAceContextType => {
   }
   return context;
 };
+
+    
