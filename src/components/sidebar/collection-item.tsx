@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { HttpMethodBadge } from '../request/http-method-badge';
-import { MoreHorizontal, Download, Edit, Trash2, Plus, Check, X, Copy } from 'lucide-react';
+import { MoreHorizontal, Download, Edit, Trash2, Plus, Check, X, Copy, Share2, Loader2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,11 +36,12 @@ interface CollectionItemProps {
 }
 
 export function CollectionItem({ collection }: CollectionItemProps) {
-  const { state, openRequestInTab, exportCollection, updateCollectionName, deleteCollection, createRequest, deleteRequest } = useApiAce();
+  const { openRequestInTab, exportCollection, updateCollectionName, deleteCollection, createRequest, deleteRequest, syncCollectionToCloud } = useApiAce();
   const [isEditing, setIsEditing] = useState(false);
   const [newName, setNewName] = useState(collection.name);
   const [newRequestName, setNewRequestName] = useState('');
   const [isAddingRequest, setIsAddingRequest] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const { toast } = useToast();
 
   const handleRename = () => {
@@ -61,6 +62,17 @@ export function CollectionItem({ collection }: CollectionItemProps) {
   const copyAccessCode = () => {
     navigator.clipboard.writeText(collection.id);
     toast({ title: 'Access Code Copied', description: 'The collection access code has been copied to your clipboard.' });
+  };
+
+  const handleSync = async () => {
+    setIsSyncing(true);
+    try {
+      await syncCollectionToCloud(collection.id);
+    } catch(e) {
+      // Error is already handled by toast in useApiAce
+    } finally {
+      setIsSyncing(false);
+    }
   };
   
   const findRequestInCollection = (requestId: string): ApiRequest | undefined => {
@@ -103,8 +115,12 @@ export function CollectionItem({ collection }: CollectionItemProps) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent onClick={(e) => e.stopPropagation()}>
+                 <DropdownMenuItem onClick={handleSync} disabled={isSyncing}>
+                  {isSyncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Share2 className="mr-2 h-4 w-4" />}
+                   Sync to Cloud
+                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setIsEditing(true)}><Edit className="mr-2 h-4 w-4" /> Rename</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => exportCollection(collection.id)}><Download className="mr-2 h-4 w-4" /> Export</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => exportCollection(collection.id)}><Download className="mr-2 h-4 w-4" /> Export (Local)</DropdownMenuItem>
                 <DropdownMenuItem onClick={copyAccessCode}><Copy className="mr-2 h-4 w-4" /> Copy Access Code</DropdownMenuItem>
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
@@ -114,7 +130,7 @@ export function CollectionItem({ collection }: CollectionItemProps) {
                     <AlertDialogHeader>
                       <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        This will permanently delete the collection "{collection.name}" and all its requests. This action cannot be undone.
+                        This will permanently delete the collection "{collection.name}" and all its requests from local storage. This action cannot be undone.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>

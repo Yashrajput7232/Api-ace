@@ -211,6 +211,8 @@ interface ApiAceContextType {
   cancelRequest: (tabId: string) => void;
   createRequest: (collectionId: string, name: string) => void;
   deleteRequest: (collectionId: string, requestId: string) => void;
+  syncCollectionToCloud: (collectionId: string) => Promise<void>;
+  importFromCloud: (accessCode: string) => Promise<boolean>;
 }
 
 const ApiAceContext = createContext<ApiAceContextType | undefined>(undefined);
@@ -233,10 +235,9 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     try {
-      // Create a partial state to avoid serializing non-serializable data
       const stateToStore = {
           collections: state.collections,
-          activeTabs: state.activeTabs.map(({ ...tab }) => tab), // Create a shallow copy
+          activeTabs: state.activeTabs.map(({ ...tab }) => tab),
           activeTabId: state.activeTabId,
       };
       localStorage.setItem('apiAceState', JSON.stringify(stateToStore));
@@ -250,15 +251,16 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [state, toast]);
 
-  const findRequestById = useCallback((requestId: string): ApiRequest | undefined => {
+  const findRequestById = useCallback((requestId: string): (ApiRequest | undefined) => {
     for (const collection of state.collections) {
-      const foundRequest = collection.requests.find(r => r.id === requestId);
-      if (foundRequest) {
-        return foundRequest;
-      }
+        const found = collection.requests.find(r => r.id === requestId);
+        if (found) return found;
+    }
+    for (const tab of state.activeTabs) {
+        if (tab.id === requestId) return tab;
     }
     return undefined;
-  }, [state.collections]);
+  }, [state.collections, state.activeTabs]);
 
   const openRequestInTab = useCallback((requestToOpen: ApiRequest) => {
     if (requestToOpen) {
@@ -321,7 +323,6 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
         
         const collectionsToImport: Collection[] = Array.isArray(imported) ? imported : [imported];
         
-        // Basic validation
         collectionsToImport.forEach(c => {
           if (!c.id || !c.name || !Array.isArray(c.requests)) {
             throw new Error("Invalid collection format");
@@ -475,6 +476,71 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
         abortControllers.current.delete(tabId);
     }
   }, [state.activeTabs]);
+
+  const syncCollectionToCloud = async (collectionId: string) => {
+    const collection = state.collections.find(c => c.id === collectionId);
+    if (!collection) {
+        toast({ variant: 'destructive', title: 'Sync Failed', description: 'Collection not found locally.' });
+        return;
+    }
+    try {
+        const response = await fetch('/api/collections', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(collection),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.message || 'Failed to sync collection');
+        }
+        toast({
+            title: 'Sync Successful!',
+            description: 'Your collection has been saved to the cloud.',
+            action: (
+              <button
+                className="text-sm font-medium text-primary underline"
+                onClick={() => navigator.clipboard.writeText(collection.id)}
+              >
+                Copy Access Code
+              </button>
+            ),
+        });
+    } catch (error) {
+        toast({
+            variant: 'destructive',
+            title: 'Sync Failed',
+            description: error instanceof Error ? error.message : 'An unknown error occurred.',
+        });
+        throw error;
+    }
+  };
+
+  const importFromCloud = async (accessCode: string): Promise<boolean> => {
+    try {
+        const response = await fetch(`/api/collections/${accessCode}`);
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.message || 'Failed to import collection');
+        }
+
+        const collection: Collection = result;
+        dispatch({ type: 'IMPORT_COLLEctions', payload: [collection] });
+
+        toast({
+            title: 'Import Successful',
+            description: `Collection "${collection.name}" has been imported.`,
+        });
+        return true;
+    } catch (error) {
+        toast({
+            variant: 'destructive',
+            title: 'Import Failed',
+            description: error instanceof Error ? error.message : 'An unknown error occurred.',
+        });
+        return false;
+    }
+  };
   
   return (
     <ApiAceContext.Provider value={{
@@ -487,16 +553,14 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
       exportCollection,
       openRequestInTab: (request: ApiRequest) => {
         const req = findRequestById(request.id);
-        if (req) {
-            openRequestInTab(req);
-        } else {
-            openRequestInTab(request);
-        }
+        openRequestInTab(req ?? request);
       },
       sendRequest,
       cancelRequest,
       createRequest,
-      deleteRequest
+      deleteRequest,
+      syncCollectionToCloud,
+      importFromCloud,
     }}>
       {children}
     </ApiAceContext.Provider>
