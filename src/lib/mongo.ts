@@ -27,24 +27,30 @@ export async function getDb(): Promise<Db> {
 
     if (!globalWithMongo._mongoClientPromise) {
       cachedClient = new MongoClient(uri!);
-      globalWithMongo._mongoClientPromise = cachedClient.connect();
+      globalWithMongo._mongoClientPromise = cachedClient.connect().then(async (client) => {
+        try {
+            await client.db(dbName).collection('users').createIndex({ email: 1 }, { unique: true });
+            await client.db(dbName).collection('collections').createIndex({ userId: 1 });
+        } catch (error) {
+            console.warn('Could not create indexes, they may already exist.', error);
+        }
+        return client;
+      });
     }
     cachedClient = await globalWithMongo._mongoClientPromise;
   } else {
     // In production mode, it's best to not use a global variable.
     cachedClient = new MongoClient(uri!);
     await cachedClient.connect();
+     try {
+        await cachedClient.db(dbName).collection('users').createIndex({ email: 1 }, { unique: true });
+        await cachedClient.db(dbName).collection('collections').createIndex({ userId: 1 });
+      } catch (error) {
+        console.warn('Could not create indexes, they may already exist.', error);
+      }
   }
   
   cachedDb = cachedClient.db(dbName);
-
-  // Create indexes if they don't exist
-  try {
-    await cachedDb.collection('users').createIndex({ email: 1 }, { unique: true });
-    await cachedDb.collection('collections').createIndex({ userId: 1 });
-  } catch (error) {
-    console.warn('Could not create indexes, they may already exist.', error);
-  }
 
   return cachedDb;
 }
