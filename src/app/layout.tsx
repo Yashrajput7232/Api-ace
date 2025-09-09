@@ -6,7 +6,7 @@ import { Toaster } from '@/components/ui/toaster';
 
 export const metadata: Metadata = {
   title: 'API Ace',
-  description: 'A Postman-like web application running entirely on the frontend.',
+  description: 'The open-source Postman alternative.',
 };
 
 export default function RootLayout({

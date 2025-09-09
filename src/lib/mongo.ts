@@ -40,9 +40,10 @@ export async function getDb(): Promise<Db> {
 
   // Create indexes if they don't exist
   try {
-    await cachedDb.collection('collections').createIndex({ id: 1 }, { unique: true });
+    await cachedDb.collection('users').createIndex({ email: 1 }, { unique: true });
+    await cachedDb.collection('collections').createIndex({ userId: 1 });
   } catch (error) {
-    console.warn('Could not create index on collections, it may already exist.', error);
+    console.warn('Could not create indexes, they may already exist.', error);
   }
 
   return cachedDb;

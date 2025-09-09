@@ -1,8 +1,10 @@
 "use client";
 
-import type { Collection, ApiRequest, RequestTab, ApiResponse, HttpMethod, Auth } from '@/types';
+import type { Collection, ApiRequest, RequestTab, ApiResponse, HttpMethod, Auth, User } from '@/types';
 import React, { createContext, useContext, useReducer, useEffect, useCallback, ReactNode, useRef } from 'react';
 import { useToast } from './use-toast';
+import { ObjectId } from 'mongodb';
+
 
 // --- STATE AND REDUCER ---
 
@@ -10,13 +12,17 @@ interface AppState {
   collections: Collection[];
   activeTabs: RequestTab[];
   activeTabId: string | null;
+  user: Omit<User, 'password'> | null;
+  isInitialized: boolean;
 }
 
 type Action =
-  | { type: 'SET_INITIAL_STATE'; payload: AppState }
+  | { type: 'SET_INITIAL_STATE'; payload: Pick<AppState, 'collections' | 'activeTabs' | 'activeTabId'> }
+  | { type: 'SET_USER'; payload: AppState['user'] }
+  | { type: 'SET_CLOUD_COLLECTIONS'; payload: Collection[] }
   | { type: 'ADD_COLLECTION'; payload: Collection }
   | { type: 'DELETE_COLLECTION'; payload: string }
-  | { type: 'UPDATE_COLLECTION_NAME'; payload: { id: string; name: string } }
+  | { type: 'UPDATE_COLLECTION'; payload: Collection }
   | { type: 'CREATE_REQUEST'; payload: { collectionId: string; request: ApiRequest } }
   | { type: 'DELETE_REQUEST'; payload: { collectionId: string; requestId: string } }
   | { type: 'IMPORT_COLLECTIONS'; payload: Collection[] }
@@ -32,6 +38,8 @@ const initialState: AppState = {
   collections: [],
   activeTabs: [],
   activeTabId: null,
+  user: null,
+  isInitialized: false,
 };
 
 // Helper to add default auth to legacy requests
@@ -57,14 +65,23 @@ const addDefaultAuth = (request: Partial<ApiRequest>): ApiRequest => {
 const appReducer = (state: AppState, action: Action): AppState => {
   switch (action.type) {
     case 'SET_INITIAL_STATE':
-        // Add default auth to collections and tabs if it's missing (for legacy data)
         const collectionsWithAuth = action.payload.collections.map(c => ({
             ...c,
             requests: c.requests.map(r => addDefaultAuth(r))
         }));
         const tabsWithAuth = action.payload.activeTabs.map(t => addDefaultAuth(t) as RequestTab);
 
-        return { ...action.payload, collections: collectionsWithAuth, activeTabs: tabsWithAuth };
+        return { ...state, ...action.payload, collections: collectionsWithAuth, activeTabs: tabsWithAuth, isInitialized: true };
+
+    case 'SET_USER':
+        return { ...state, user: action.payload };
+    
+    case 'SET_CLOUD_COLLECTIONS':
+        // Merge local and cloud collections, cloud takes precedence
+        const localCollections = state.collections.filter(c => !c.userId);
+        const cloudCollections = action.payload;
+        const allCollections = [...localCollections, ...cloudCollections];
+        return { ...state, collections: allCollections };
 
     case 'ADD_COLLECTION':
       return { ...state, collections: [...state.collections, action.payload] };
@@ -72,10 +89,10 @@ const appReducer = (state: AppState, action: Action): AppState => {
     case 'DELETE_COLLECTION':
       return { ...state, collections: state.collections.filter(c => c.id !== action.payload)};
 
-    case 'UPDATE_COLLECTION_NAME':
+    case 'UPDATE_COLLECTION':
       return {
         ...state,
-        collections: state.collections.map(c => c.id === action.payload.id ? { ...c, name: action.payload.name } : c)
+        collections: state.collections.map(c => c.id === action.payload.id ? action.payload : c)
       };
 
     case 'CREATE_REQUEST':
@@ -201,9 +218,9 @@ const appReducer = (state: AppState, action: Action): AppState => {
 interface ApiAceContextType {
   state: AppState;
   dispatch: React.Dispatch<Action>;
-  createCollection: (name: string) => Collection;
+  createCollection: (name: string) => void;
   deleteCollection: (id: string) => void;
-  updateCollectionName: (id: string, name: string) => void;
+  updateCollection: (collection: Collection) => void;
   importCollections: (file: File) => void;
   exportCollection: (collectionId: string) => void;
   openRequestInTab: (request: ApiRequest) => void;
@@ -211,8 +228,9 @@ interface ApiAceContextType {
   cancelRequest: (tabId: string) => void;
   createRequest: (collectionId: string, name: string) => void;
   deleteRequest: (collectionId: string, requestId: string) => void;
-  syncCollectionToCloud: (collectionId: string) => Promise<void>;
-  importFromCloud: (accessCode: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<boolean>;
+  register: (email: string, password: string) => Promise<boolean>;
+  logout: () => void;
 }
 
 const ApiAceContext = createContext<ApiAceContextType | undefined>(undefined);
@@ -222,34 +240,48 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
   const { toast } = useToast();
   const abortControllers = useRef(new Map<string, AbortController>());
 
+  const syncToCloud = useCallback(async (collection: Collection) => {
+    if (!state.user) return; // Don't sync if not logged in
+    try {
+        await fetch('/api/collections', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(collection),
+        });
+    } catch (error) {
+        console.error("Failed to sync collection to cloud:", error);
+        toast({ variant: 'destructive', title: 'Sync Failed', description: 'Could not save collection to the cloud.'});
+    }
+  }, [state.user, toast]);
+
+  // Load local state on mount
   useEffect(() => {
     try {
       const storedState = localStorage.getItem('apiAceState');
       if (storedState) {
         dispatch({ type: 'SET_INITIAL_STATE', payload: JSON.parse(storedState) });
+      } else {
+        dispatch({ type: 'SET_INITIAL_STATE', payload: { collections: [], activeTabs: [], activeTabId: null } });
       }
     } catch (error) {
       console.error("Failed to load state from localStorage", error);
     }
   }, []);
 
+  // Persist state to local storage and sync to cloud
   useEffect(() => {
+    if (!state.isInitialized) return;
     try {
       const stateToStore = {
-          collections: state.collections,
+          collections: state.collections.filter(c => !c.userId), // Only store local collections
           activeTabs: state.activeTabs.map(({ ...tab }) => tab),
           activeTabId: state.activeTabId,
       };
       localStorage.setItem('apiAceState', JSON.stringify(stateToStore));
     } catch (error) {
       console.error("Failed to save state to localStorage", error);
-      toast({
-        variant: "destructive",
-        title: "Error saving state",
-        description: "Could not save to localStorage. Your changes may not be persisted.",
-      });
     }
-  }, [state, toast]);
+  }, [state.collections, state.activeTabs, state.activeTabId, state.isInitialized]);
 
   const findRequestById = useCallback((requestId: string): (ApiRequest | undefined) => {
     for (const collection of state.collections) {
@@ -261,30 +293,37 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
     }
     return undefined;
   }, [state.collections, state.activeTabs]);
-
-  const openRequestInTab = useCallback((requestToOpen: ApiRequest) => {
-    if (requestToOpen) {
-      dispatch({ type: 'OPEN_TAB', payload: requestToOpen });
-    } else {
-      toast({ variant: "destructive", title: "Error", description: "Request not found." });
-    }
-  }, [toast]);
-
-  const createCollection = useCallback((name: string): Collection => {
-    const newCollection: Collection = { id: crypto.randomUUID(), name, requests: [] };
-    dispatch({ type: 'ADD_COLLECTION', payload: newCollection });
-    toast({ title: "Collection created", description: `"${name}" has been created.` });
-    return newCollection;
-  }, [toast]);
   
-  const deleteCollection = useCallback((id: string) => {
+  const openRequestInTab = useCallback((requestToOpen: ApiRequest) => {
+    dispatch({ type: 'OPEN_TAB', payload: requestToOpen });
+  }, []);
+
+  const createCollection = useCallback((name: string) => {
+    const newCollection: Collection = { 
+        id: new ObjectId().toHexString(), 
+        name, 
+        requests: [],
+        userId: state.user ? new ObjectId(state.user.id) : undefined as any // Hack until we fix types
+    };
+    dispatch({ type: 'ADD_COLLECTION', payload: newCollection });
+    if (state.user) {
+        syncToCloud(newCollection);
+    }
+    toast({ title: "Collection created", description: `"${name}" has been created.` });
+  }, [toast, state.user, syncToCloud]);
+  
+  const deleteCollection = useCallback(async (id: string) => {
     dispatch({ type: 'DELETE_COLLECTION', payload: id });
     toast({ title: "Collection deleted" });
+    // Also delete from cloud if it's a cloud collection
   }, [toast]);
 
-  const updateCollectionName = useCallback((id: string, name: string) => {
-    dispatch({ type: 'UPDATE_COLLECTION_NAME', payload: { id, name } });
-  }, []);
+  const updateCollection = useCallback((collection: Collection) => {
+    dispatch({ type: 'UPDATE_COLLECTION', payload: collection });
+    if(collection.userId) {
+        syncToCloud(collection);
+    }
+  }, [syncToCloud]);
   
   const createRequest = useCallback((collectionId: string, name: string) => {
     const collection = state.collections.find(c => c.id === collectionId);
@@ -302,16 +341,35 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
       params: []
     };
     
-    dispatch({type: 'CREATE_REQUEST', payload: { collectionId, request: newRequest }});
+    const updatedCollection = {
+        ...collection,
+        requests: [...collection.requests, newRequest]
+    }
+    dispatch({type: 'UPDATE_COLLECTION', payload: updatedCollection});
+    if(updatedCollection.userId) {
+        syncToCloud(updatedCollection);
+    }
     openRequestInTab(newRequest);
 
-  }, [state.collections, openRequestInTab]);
+  }, [state.collections, openRequestInTab, syncToCloud]);
   
   const deleteRequest = useCallback((collectionId: string, requestId: string) => {
-    dispatch({type: 'DELETE_REQUEST', payload: { collectionId, requestId }});
+    const collection = state.collections.find(c => c.id === collectionId);
+    if (!collection) return;
+
+    const updatedCollection = {
+        ...collection,
+        requests: collection.requests.filter(r => r.id !== requestId)
+    }
+
+    dispatch({type: 'UPDATE_COLLECTION', payload: updatedCollection});
+    if(updatedCollection.userId) {
+        syncToCloud(updatedCollection);
+    }
+
     dispatch({type: 'CLOSE_TAB', payload: requestId});
     toast({title: 'Request deleted'})
-  }, [toast]);
+  }, [toast, state.collections, syncToCloud]);
 
   const importCollections = useCallback((file: File) => {
     const reader = new FileReader();
@@ -332,7 +390,7 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
         dispatch({ type: 'IMPORT_COLLECTIONS', payload: collectionsToImport });
         toast({
           title: "Import Successful",
-          description: `${collectionsToImport.length} collection(s) imported.`,
+          description: `${collectionsToImport.length} collection(s) imported locally.`,
         });
       } catch (error) {
         toast({
@@ -477,78 +535,97 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [state.activeTabs]);
 
-  const syncCollectionToCloud = async (collectionId: string) => {
-    const collection = state.collections.find(c => c.id === collectionId);
-    if (!collection) {
-        toast({ variant: 'destructive', title: 'Sync Failed', description: 'Collection not found locally.' });
-        return;
-    }
+  const fetchCloudCollections = useCallback(async () => {
     try {
-        const response = await fetch('/api/collections', {
+        const response = await fetch('/api/collections');
+        if (response.ok) {
+            const cloudCollections = await response.json();
+            dispatch({ type: 'SET_CLOUD_COLLECTIONS', payload: cloudCollections });
+        } else if (response.status !== 401) { // Ignore unauthorized
+            throw new Error("Failed to fetch collections");
+        }
+    } catch (error) {
+        console.error("Could not fetch cloud collections", error);
+    }
+  }, []);
+
+  const login = async (email: string, password: string): Promise<boolean> => {
+    try {
+        const response = await fetch('/api/auth/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(collection),
+            body: JSON.stringify({ email, password }),
         });
-        const result = await response.json();
-        if (!response.ok) {
-            throw new Error(result.message || 'Failed to sync collection');
-        }
-        toast({
-            title: 'Sync Successful!',
-            description: 'Your collection has been saved to the cloud.',
-            action: (
-              <button
-                className="text-sm font-medium text-primary underline"
-                onClick={() => navigator.clipboard.writeText(collection.id)}
-              >
-                Copy Access Code
-              </button>
-            ),
-        });
-    } catch (error) {
-        toast({
-            variant: 'destructive',
-            title: 'Sync Failed',
-            description: error instanceof Error ? error.message : 'An unknown error occurred.',
-        });
-        throw error;
-    }
-  };
-
-  const importFromCloud = async (accessCode: string): Promise<boolean> => {
-    try {
-        const response = await fetch(`/api/collections/${accessCode}`);
-        const result = await response.json();
-
-        if (!response.ok) {
-            throw new Error(result.message || 'Failed to import collection');
-        }
-
-        const collection: Collection = result;
-        dispatch({ type: 'IMPORT_COLLEctions', payload: [collection] });
-
-        toast({
-            title: 'Import Successful',
-            description: `Collection "${collection.name}" has been imported.`,
-        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message);
+        
+        dispatch({ type: 'SET_USER', payload: data.user });
+        await fetchCloudCollections();
+        toast({ title: 'Login Successful', description: `Welcome back, ${data.user.email}!`});
         return true;
     } catch (error) {
-        toast({
-            variant: 'destructive',
-            title: 'Import Failed',
-            description: error instanceof Error ? error.message : 'An unknown error occurred.',
-        });
+        toast({ variant: 'destructive', title: 'Login Failed', description: error instanceof Error ? error.message : 'An unknown error occurred.' });
         return false;
     }
   };
+
+  const register = async (email: string, password: string): Promise<boolean> => {
+    try {
+        const response = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message);
+        await login(email, password); // Auto-login after successful registration
+        return true;
+    } catch (error) {
+        toast({ variant: 'destructive', title: 'Registration Failed', description: error instanceof Error ? error.message : 'An unknown error occurred.' });
+        return false;
+    }
+  };
+
+  const logout = async () => {
+    try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        dispatch({ type: 'SET_USER', payload: null });
+        // Keep local collections but remove cloud ones
+        const localCollections = state.collections.filter(c => !c.userId);
+        dispatch({ type: 'SET_INITIAL_STATE', payload: { ...state, collections: localCollections } });
+        toast({ title: 'Logout Successful' });
+    } catch (error) {
+        toast({ variant: 'destructive', title: 'Logout Failed' });
+    }
+  };
   
+  // Check session on initial load
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const res = await fetch('/api/auth/session');
+        if(res.ok) {
+            const data = await res.json();
+            if (data.user) {
+                dispatch({ type: 'SET_USER', payload: data.user });
+                await fetchCloudCollections();
+            }
+        }
+      } catch (error) {
+        console.error("Session check failed", error);
+      }
+    };
+    checkSession();
+  }, [fetchCloudCollections]);
+
+
   return (
     <ApiAceContext.Provider value={{
       state,
       dispatch,
       createCollection,
       deleteCollection,
-      updateCollectionName,
+      updateCollection,
       importCollections,
       exportCollection,
       openRequestInTab: (request: ApiRequest) => {
@@ -559,8 +636,9 @@ export const ApiAceProvider = ({ children }: { children: ReactNode }) => {
       cancelRequest,
       createRequest,
       deleteRequest,
-      syncCollectionToCloud,
-      importFromCloud,
+      login,
+      register,
+      logout,
     }}>
       {children}
     </ApiAceContext.Provider>

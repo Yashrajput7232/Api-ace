@@ -1,3 +1,5 @@
+import { ObjectId } from "mongodb";
+
 export interface KeyValue {
   id: string;
   key: string;
@@ -37,9 +39,11 @@ export interface ApiRequest {
 }
 
 export interface Collection {
-  id: string; // This is the access code
+  _id?: ObjectId;
+  id: string;
   name: string;
   requests: ApiRequest[];
+  userId: ObjectId;
 }
 
 export interface ApiResponse {
@@ -55,4 +59,11 @@ export interface RequestTab extends ApiRequest {
   response?: ApiResponse;
   loading: boolean;
   isDirty: boolean;
+}
+
+export interface User {
+  _id: ObjectId;
+  id: string;
+  email: string;
+  password: string;
 }

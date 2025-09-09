@@ -6,26 +6,23 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CollectionItem } from './collection-item';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Plus, Upload, Download, CloudDownload, Loader2 } from 'lucide-react';
+import { Plus, Upload } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
   DialogFooter,
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { ThemeToggle } from '../theme-toggle';
+import { AuthDialog } from '../auth/auth-dialog';
 
 export function Sidebar() {
-  const { state, createCollection, importCollections, importFromCloud } = useApiAce();
+  const { state, createCollection, importCollections } = useApiAce();
   const [newCollectionName, setNewCollectionName] = useState('');
   const [isCreateDialogOpen, setCreateDialogOpen] = useState(false);
-  const [isImportDialogOpen, setImportDialogOpen] = useState(false);
-  const [accessCode, setAccessCode] = useState('');
-  const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   
@@ -54,24 +51,8 @@ export function Sidebar() {
         });
       }
     }
-    // Reset file input
     event.target.value = '';
   };
-
-  const handleCloudImport = async () => {
-    if (!accessCode.trim()) {
-      toast({ variant: 'destructive', title: 'Access code is required.' });
-      return;
-    }
-    setIsImporting(true);
-    const success = await importFromCloud(accessCode);
-    setIsImporting(false);
-    if(success) {
-      setImportDialogOpen(false);
-      setAccessCode('');
-    }
-  }
-
 
   return (
     <div className="h-full flex flex-col bg-background border-r">
@@ -112,32 +93,6 @@ export function Sidebar() {
             className="hidden"
             accept=".json,application/json"
         />
-
-        <Dialog open={isImportDialogOpen} onOpenChange={setImportDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" variant="outline" className="col-span-2">
-                <CloudDownload className="mr-2 h-4 w-4" /> Import from Cloud
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Import from Cloud</DialogTitle>
-              <DialogDescription>Enter the access code for the collection you want to import.</DialogDescription>
-            </DialogHeader>
-            <Input
-              placeholder="Access Code"
-              value={accessCode}
-              onChange={(e) => setAccessCode(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCloudImport()}
-            />
-            <DialogFooter>
-              <Button onClick={handleCloudImport} disabled={isImporting}>
-                {isImporting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Import
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
       </div>
 
       <ScrollArea className="flex-1">
@@ -147,7 +102,8 @@ export function Sidebar() {
           ))}
         </div>
       </ScrollArea>
-      <div className="p-2 border-t mt-auto">
+      <div className="p-2 border-t mt-auto flex flex-col gap-2">
+        <AuthDialog />
         <ThemeToggle />
       </div>
     </div>

@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { HttpMethodBadge } from '../request/http-method-badge';
-import { MoreHorizontal, Download, Edit, Trash2, Plus, Check, X, Copy, Share2, Loader2 } from 'lucide-react';
+import { MoreHorizontal, Download, Edit, Trash2, Plus, Check, X, Cloud } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,17 +36,15 @@ interface CollectionItemProps {
 }
 
 export function CollectionItem({ collection }: CollectionItemProps) {
-  const { openRequestInTab, exportCollection, updateCollectionName, deleteCollection, createRequest, deleteRequest, syncCollectionToCloud } = useApiAce();
+  const { state, openRequestInTab, exportCollection, updateCollection, deleteCollection, createRequest, deleteRequest } = useApiAce();
   const [isEditing, setIsEditing] = useState(false);
   const [newName, setNewName] = useState(collection.name);
   const [newRequestName, setNewRequestName] = useState('');
   const [isAddingRequest, setIsAddingRequest] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const { toast } = useToast();
 
   const handleRename = () => {
     if (newName.trim() && newName !== collection.name) {
-      updateCollectionName(collection.id, newName.trim());
+      updateCollection({ ...collection, name: newName.trim() });
     }
     setIsEditing(false);
   };
@@ -58,32 +56,19 @@ export function CollectionItem({ collection }: CollectionItemProps) {
       setIsAddingRequest(false);
     }
   };
-
-  const copyAccessCode = () => {
-    navigator.clipboard.writeText(collection.id);
-    toast({ title: 'Access Code Copied', description: 'The collection access code has been copied to your clipboard.' });
-  };
-
-  const handleSync = async () => {
-    setIsSyncing(true);
-    try {
-      await syncCollectionToCloud(collection.id);
-    } catch(e) {
-      // Error is already handled by toast in useApiAce
-    } finally {
-      setIsSyncing(false);
-    }
-  };
   
   const findRequestInCollection = (requestId: string): ApiRequest | undefined => {
       return collection.requests.find(r => r.id === requestId);
   }
+
+  const isCloudSynced = !!collection.userId;
 
   return (
     <Accordion type="single" collapsible>
       <AccordionItem value={collection.id} className="border rounded-md">
         <AccordionTrigger className="px-2 hover:no-underline">
           <div className="flex items-center w-full">
+            {isCloudSynced && <Cloud className="h-4 w-4 mr-2 text-blue-500 shrink-0" title="Saved to cloud"/>}
             {isEditing ? (
               <div className="flex-1 flex items-center gap-1">
                 <Input
@@ -115,13 +100,8 @@ export function CollectionItem({ collection }: CollectionItemProps) {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent onClick={(e) => e.stopPropagation()}>
-                 <DropdownMenuItem onClick={handleSync} disabled={isSyncing}>
-                  {isSyncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Share2 className="mr-2 h-4 w-4" />}
-                   Sync to Cloud
-                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setIsEditing(true)}><Edit className="mr-2 h-4 w-4" /> Rename</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => exportCollection(collection.id)}><Download className="mr-2 h-4 w-4" /> Export (Local)</DropdownMenuItem>
-                <DropdownMenuItem onClick={copyAccessCode}><Copy className="mr-2 h-4 w-4" /> Copy Access Code</DropdownMenuItem>
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                      <DropdownMenuItem onSelect={e => e.preventDefault()} className="text-destructive focus:text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Delete</DropdownMenuItem>
@@ -130,7 +110,7 @@ export function CollectionItem({ collection }: CollectionItemProps) {
                     <AlertDialogHeader>
                       <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        This will permanently delete the collection "{collection.name}" and all its requests from local storage. This action cannot be undone.
+                        This will permanently delete the collection "{collection.name}" and all its requests. This action cannot be undone.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
